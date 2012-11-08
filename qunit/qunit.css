@@ -233,3 +233,32 @@
 	width: 1000px;
 	height: 1000px;
 }
+
+/* Perf changes */
+
+#qunit-tests li.terrible .time {
+	color: red;
+}
+
+#qunit-tests li.bad .time {
+	color: DeepPink;
+}
+
+#qunit-tests li.okish .time {
+	color: orange;
+}
+
+#qunit-tests.worst-than-terrible li.ok,
+#qunit-tests.worst-than-terrible li.okish,
+#qunit-tests.worst-than-terrible li.bad {
+	display: none;
+}
+
+#qunit-tests.worst-than-bad li.ok,
+#qunit-tests.worst-than-bad li.okish {
+	display: none;
+}
+
+#qunit-tests.worst-than-okish li.ok {
+	display: none;
+}
