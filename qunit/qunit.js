@@ -10,6 +10,13 @@
 
 (function( window ) {
 
+// CONSOLE_LOG_CHANGE
+var collectedGlobalErrors = [];
+window.onerror = function(errorMessage, url, lineNumber) {
+	collectedGlobalErrors.push(errorMessage + " in " + url + ":" + lineNumber);
+};
+// END CONSOLE_LOG_CHANGE
+
 var QUnit,
 	assert,
 	config,
@@ -54,7 +61,10 @@ Test.prototype = {
 			// `a` initialized at top of scope
 			a = document.createElement( "a" );
 			a.innerHTML = "Rerun";
-			a.href = QUnit.url({ testNumber: this.testNumber });
+			// RERUNCHANGE
+			//a.href = QUnit.url({ testNumber: this.testNumber });
+			a.href = QUnit.url({ filter: this.testName });
+			// END RERUNCHANGE
 
 			li = document.createElement( "li" );
 			li.appendChild( b );
@@ -93,10 +103,33 @@ Test.prototype = {
 			teardown: function() {}
 		}, this.moduleTestEnvironment );
 
+		// TIMING CHANGE
+		this.timeStart = (new Date()).getTime();
+		// END TIMING CHANGE
 		runLoggingCallbacks( "testStart", QUnit, {
 			name: this.testName,
 			module: this.module
 		});
+		
+		// CONSOLE_LOG_CHANGE
+		function mockLog(original) {
+			var shim = function(message) {
+				shim.log.push(message);
+			};
+			
+			shim.log = [];
+			shim.original = original;
+			shim.assert = function(message) {
+				if (shim.log.length > 0) {
+					var str = shim.log.join('\n');
+					QUnit.ok(false, message + str);
+				}
+			};
+			return shim;
+		}
+		window.console.error = mockLog(window.console.error);
+		window.console.log = mockLog(window.console.log);
+		// END CONSOLE_LOG_CHANGE
 
 		// allow utility functions to access the current test environment
 		// TODO why??
@@ -169,6 +202,17 @@ Test.prototype = {
 		} else if ( this.expected === null && !this.assertions.length ) {
 			QUnit.pushFailure( "Expected at least one assertion, but none were run - call expect(0) to accept zero assertions.", this.stack );
 		}
+		
+		// CONSOLE_LOG_CHANGE
+		if (collectedGlobalErrors.length > 0) {
+			QUnit.ok(false, "caught in window.onerror (and probably not related to this test case):\n" + collectedGlobalErrors.join('\n'));
+		}
+		collectedGlobalErrors = [];
+		window.console.error.assert("Unexpected error console output:\n");
+		window.console.error = window.console.error.original;
+		window.console.log.assert("Unexpected log console output:\n");
+		window.console.log = window.console.log.original;
+		// END CONSOLE_LOG_CHANGE
 
 		var assertion, a, b, i, li, ol,
 			test = this,
@@ -215,8 +259,29 @@ Test.prototype = {
 
 			// `b` initialized at top of scope
 			b = document.createElement( "strong" );
+			
+			// TIMING CHANGE
+			this.timeTaken = ((new Date()).getTime() - this.timeStart);
+			var timePerAssertion = this.timeTaken / Math.max(1, this.assertions.length);
+			var color = "";
+			
+			var timeClass = "ok";
+			if (timePerAssertion > 50) {
+				timeClass = "terrible";
+			} else if (timePerAssertion > 10) {
+				timeClass = "bad";
+			} else if (timePerAssertion  > 3) {
+				timeClass = "okish";
+			}
+			var timeTakenSpan = "<span class='time'>[" + this.timeTaken + "ms]</span>&nbsp;<span class='time'>[" + Math.round(timePerAssertion) + "<sup>ms</sup>/<sub>assert</sub>]</span>&nbsp;";
+			// END TIMINGCHANGE
+			
 			b.innerHTML = this.name + " <b class='counts'>(<b class='failed'>" + bad + "</b>, <b class='passed'>" + good + "</b>, " + this.assertions.length + ")</b>";
 
+			// TIMING CHANGE
+			b.innerHTML = timeTakenSpan + b.innerHTML;
+			// END TIMING CHANGE
+			
 			addEvent(b, "click", function() {
 				var next = b.nextSibling.nextSibling,
 					collapsed = hasClass( next, "qunit-collapsed" );
@@ -236,6 +301,9 @@ Test.prototype = {
 			// `li` initialized at top of scope
 			li = id( this.id );
 			li.className = bad ? "fail" : "pass";
+			// TIMING CHANGE
+			li.className += " " + timeClass;
+			// TIMING CHANGE
 			li.removeChild( li.firstChild );
 			a = li.firstChild;
 			li.appendChild( b );
@@ -257,7 +325,9 @@ Test.prototype = {
 			module: this.module,
 			failed: bad,
 			passed: this.assertions.length - bad,
-			total: this.assertions.length
+			total: this.assertions.length, 
+			timeTaken : this.timeTaken, 
+			testId : this.testId
 		});
 
 		QUnit.reset();
@@ -321,7 +391,7 @@ QUnit = {
 		QUnit.test( testName, expected, callback, true );
 	},
 
-	test: function( testName, expected, callback, async ) {
+	test: function( testName, expected, callback, async, testId ) {
 		var test,
 			name = "<span class='test-name'>" + escapeInnerText( testName ) + "</span>";
 
@@ -342,7 +412,8 @@ QUnit = {
 			callback: callback,
 			module: config.currentModule,
 			moduleTestEnvironment: config.currentModuleTestEnvironment,
-			stack: sourceFromStacktrace( 2 )
+			stack: sourceFromStacktrace( 2 ), 
+			testId: testId
 		});
 
 		if ( !validTest( test ) ) {
@@ -496,6 +567,12 @@ assert = {
 	strictEqual: function( actual, expected, message ) {
 		QUnit.push( expected === actual, actual, expected, message );
 	},
+	
+	//BENCHANGE: QUnit is upset if 2 very large objects are used in strictEqual (e.g. editor)
+	strictEqualNoCompare: function(actual, expected, message) {
+		QUnit.push(actual === expected, message);
+	},
+	//ENDBENCHANGE
 
 	/**
 	 * @name notStrictEqual
@@ -1029,6 +1106,65 @@ QUnit.load = function() {
 		label.setAttribute( "title", "Only show tests and assertons that fail. Stored in sessionStorage." );
 		label.innerHTML = "Hide passed tests";
 		toolbar.appendChild( label );
+		
+		// TIMING CHANGE
+		var terribleFilter = document.createElement("input");
+		terribleFilter.type = "checkbox";
+		terribleFilter.id = "qunit-filter-terrible";
+		addEvent( terribleFilter, "click", function() {
+			var ol = document.getElementById("qunit-tests");
+			if ( terribleFilter.checked ) {
+				ol.className = ol.className + " worst-than-terrible";
+			} else {
+				var tmp = " " + ol.className.replace( /[\n\t\r]/g, " " ) + " ";
+				ol.className = tmp.replace(/ worst-than-terrible /, " ");
+			}
+		});
+		toolbar.appendChild( terribleFilter );
+		
+		var terribleLabel = document.createElement("label");
+		terribleLabel.setAttribute("for", "qunit-filter-terrible");
+		terribleLabel.innerHTML = "Show <strong>terrible</strong> and worse";
+		toolbar.appendChild( terribleLabel );
+		
+		var badFilter = document.createElement("input");
+		badFilter.type = "checkbox";
+		badFilter.id = "qunit-filter-bad";
+		addEvent( badFilter, "click", function() {
+			var ol = document.getElementById("qunit-tests");
+			if ( badFilter.checked ) {
+				ol.className = ol.className + " worst-than-bad";
+			} else {
+				var tmp = " " + ol.className.replace( /[\n\t\r]/g, " " ) + " ";
+				ol.className = tmp.replace(/ worst-than-bad /, " ");
+			}
+		});
+		toolbar.appendChild( badFilter );
+		
+		var badLabel = document.createElement("label");
+		badLabel.setAttribute("for", "qunit-filter-bad");
+		badLabel.innerHTML = "Show <strong>bad</strong> and worse";
+		toolbar.appendChild( badLabel );
+		
+		var okishFilter = document.createElement("input");
+		okishFilter.type = "checkbox";
+		okishFilter.id = "qunit-filter-okish";
+		addEvent( okishFilter, "click", function() {
+			var ol = document.getElementById("qunit-tests");
+			if ( okishFilter.checked ) {
+				ol.className = ol.className + " worst-than-okish";
+			} else {
+				var tmp = " " + ol.className.replace( /[\n\t\r]/g, " " ) + " ";
+				ol.className = tmp.replace(/ worst-than-okish /, " ");
+			}
+		});
+		toolbar.appendChild( okishFilter );
+		
+		var okishLabel = document.createElement("label");
+		okishLabel.setAttribute("for", "qunit-filter-okish");
+		okishLabel.innerHTML = "Show <strong>okish</strong> and worse";
+		toolbar.appendChild( okishLabel );
+		// END TIMING CHANGE
 
 		urlConfigCheckboxes = document.createElement( 'span' );
 		urlConfigCheckboxes.innerHTML = urlConfigHtml;
