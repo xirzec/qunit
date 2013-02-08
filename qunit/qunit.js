@@ -294,7 +294,10 @@ Test.prototype = {
 					target = target.parentNode;
 				}
 				if ( window.location && target.nodeName.toLowerCase() === "strong" ) {
-					window.location = QUnit.url({ testNumber: test.testNumber });
+					// RERUNCHANGE
+					//window.location = QUnit.url({ testNumber: test.testNumber });
+					window.location = QUnit.url({ filter: test.testName });
+					// END RERUNCHANGE
 				}
 			});
 
